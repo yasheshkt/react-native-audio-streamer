@@ -6,12 +6,12 @@ Pod::Spec.new do |s|
   s.name                = "react-native-audio-streamer"
   s.version             = package['version']
   s.author              = { "droibit" => "eldorplus@gmail.com" }
-  s.license             = 'Apache'
+  s.license             = package['license']
   s.summary             = s.name
   s.homepage            = 'https://github.com/eldorplus/react-native-audio-streamer'
-  s.source              = { :git => 'https://github.com/eldorplus/react-native-audio-streamer.git', :tag => "#{s.version}" }
+  s.source              = { :git => 'https://github.com/eldorplus/react-native-audio-streamer.git', :tag => "v#{s.version}" }
   s.requires_arc        = true
-  s.platform            = :ios, "8.0"
+  s.platform            = :ios, "9.0"
   s.pod_target_xcconfig = { "CLANG_CXX_LANGUAGE_STANDARD" => "c++14" }
   s.header_dir          = 'ios'
   s.preserve_paths      = "ios/**"
