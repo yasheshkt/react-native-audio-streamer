@@ -1,45 +1,45 @@
 package fm.indiecast.rnaudiostreamer;
 
-import android.os.Handler;
-import android.util.Log;
-import android.os.Build;
 import android.net.Uri;
+import androidx.annotation.Nullable;
+import android.util.Log;
 
+import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
-import com.facebook.react.bridge.Callback;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
-
+import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
+import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlaybackException;
-import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.ExoPlayerFactory;
 import com.google.android.exoplayer2.LoadControl;
+import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.SimpleExoPlayer;
-import com.google.android.exoplayer2.Timeline;
+import com.google.android.exoplayer2.audio.AudioAttributes;
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
-import com.google.android.exoplayer2.extractor.ExtractorsFactory;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
+import com.google.android.exoplayer2.source.MediaSourceEventListener;
 import com.google.android.exoplayer2.source.TrackGroupArray;
+import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.trackselection.TrackSelector;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
+import com.google.android.exoplayer2.util.Util;
 
 import java.io.IOException;
-import java.util.Map;
-import java.util.List;
 
-public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements ExoPlayer.EventListener, ExtractorMediaSource.EventListener{
+public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements Player.EventListener, MediaSourceEventListener {
 
     // Player
-    private SimpleExoPlayer player = null;
+    SimpleExoPlayer player;
     private String status = "STOPPED";
-    private ReactApplicationContext reactContext = null;
+    private ReactApplicationContext reactContext;
 
     public RNAudioStreamerModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -58,7 +58,8 @@ public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements
         return "RNAudioStreamer";
     }
 
-    @ReactMethod public void setUrl(String urlString) {
+    @ReactMethod
+    public void setUrl(String urlString) {
 
         if (player != null){
             player.stop();
@@ -67,21 +68,37 @@ public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements
             this.sendStatusEvent();
         }
 
-        // Create player
-        TrackSelector trackSelector = new DefaultTrackSelector();
-        LoadControl loadControl = new DefaultLoadControl();
-        this.player = ExoPlayerFactory.newSimpleInstance(reactContext, trackSelector, loadControl);
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.CONTENT_TYPE_MUSIC)
+                .build();
 
-        // Create source
-        ExtractorsFactory extractorsFactory = new DefaultExtractorsFactory();
+        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(reactContext);
         DefaultBandwidthMeter bandwidthMeter = new DefaultBandwidthMeter();
-        DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(reactContext, getDefaultUserAgent(), bandwidthMeter);
-        Handler mainHandler = new Handler();
-        MediaSource audioSource = new ExtractorMediaSource(Uri.parse(urlString), dataSourceFactory, extractorsFactory, mainHandler, this);
+        AdaptiveTrackSelection.Factory trackSelectionFactory = new AdaptiveTrackSelection.Factory();
 
-        // Start preparing audio
-        player.prepare(audioSource);
+        TrackSelector trackSelector = new DefaultTrackSelector(trackSelectionFactory);
+        LoadControl loadControl = new DefaultLoadControl();
+
+        player = ExoPlayerFactory.newSimpleInstance(reactContext, renderersFactory, trackSelector, loadControl);
+        player.setAudioAttributes(audioAttributes);
         player.addListener(this);
+
+        DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(reactContext,
+                Util.getUserAgent(reactContext, "com.kwanzaonline.toqueplay"),
+                bandwidthMeter);
+
+        DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setConstantBitrateSeekingEnabled(true);
+
+        ExtractorMediaSource audioSource = new ExtractorMediaSource.Factory(dataSourceFactory)
+                .setExtractorsFactory(extractorsFactory)
+                .createMediaSource(Uri.parse(urlString));
+        //Handler mainHandler = new Handler();
+        //MediaSource audioSource = new ExtractorMediaSource.Factory(dataSourceFactory)
+
+
+        player.prepare(audioSource);
     }
 
     @ReactMethod public void play() {
@@ -121,15 +138,15 @@ public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements
         Log.d("onPlayerStateChanged", ""+playbackState);
 
         switch (playbackState) {
-            case ExoPlayer.STATE_IDLE:
+            case Player.STATE_IDLE:
                 status = STOPPED;
                 this.sendStatusEvent();
                 break;
-            case ExoPlayer.STATE_BUFFERING:
+            case Player.STATE_BUFFERING:
                 status = BUFFERING;
                 this.sendStatusEvent();
                 break;
-            case ExoPlayer.STATE_READY:
+            case Player.STATE_READY:
                 if (this.player != null && this.player.getPlayWhenReady()) {
                     status = PLAYING;
                     this.sendStatusEvent();
@@ -138,7 +155,7 @@ public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements
                     this.sendStatusEvent();
                 }
                 break;
-            case ExoPlayer.STATE_ENDED:
+            case Player.STATE_ENDED:
                 status = FINISHED;
                 this.sendStatusEvent();
                 break;
@@ -149,11 +166,6 @@ public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements
     public void onPlayerError(ExoPlaybackException error) {
         status = ERROR;
         this.sendStatusEvent();
-    }
-
-    @Override
-    public void onPositionDiscontinuity() {
-
     }
 
     @Override
@@ -176,46 +188,58 @@ public class RNAudioStreamerModule extends ReactContextBaseJavaModule implements
     }
 
     @Override
-    public void onLoadError(IOException error) {
-        status = ERROR;
-        this.sendStatusEvent();
-    }
-
-    @Override
-    public void onTimelineChanged(Timeline timeline, Object manifest) {}
-
-    @Override
     public void onTracksChanged(TrackGroupArray trackGroups, TrackSelectionArray trackSelections) {}
-
-    private static String getDefaultUserAgent() {
-        StringBuilder result = new StringBuilder(64);
-        result.append("Dalvik/");
-        result.append(System.getProperty("java.vm.version")); // such as 1.1.0
-        result.append(" (Linux; U; Android ");
-
-        String version = Build.VERSION.RELEASE; // "1.0" or "3.4b5"
-        result.append(version.length() > 0 ? version : "1.0");
-
-        // add the model for the release build
-        if ("REL".equals(Build.VERSION.CODENAME)) {
-            String model = Build.MODEL;
-            if (model.length() > 0) {
-                result.append("; ");
-                result.append(model);
-            }
-        }
-        String id = Build.ID; // "MASTER" or "M4-rc20"
-        if (id.length() > 0) {
-            result.append(" Build/");
-            result.append(id);
-        }
-        result.append(")");
-        return result.toString();
-    }
 
     private void sendStatusEvent() {
         this.reactContext
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                 .emit("RNAudioStreamerStatusChanged", status);
+    }
+
+    @Override
+    public void onMediaPeriodCreated(int windowIndex, MediaSource.MediaPeriodId mediaPeriodId) {
+
+    }
+
+    @Override
+    public void onMediaPeriodReleased(int windowIndex, MediaSource.MediaPeriodId mediaPeriodId) {
+
+    }
+
+    @Override
+    public void onLoadStarted(int windowIndex, @Nullable MediaSource.MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
+
+    }
+
+    @Override
+    public void onLoadCompleted(int windowIndex, @Nullable MediaSource.MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
+
+    }
+
+    @Override
+    public void onLoadCanceled(int windowIndex, @Nullable MediaSource.MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
+
+    }
+
+    @Override
+    public void onLoadError(int windowIndex, @Nullable MediaSource.MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData, IOException error, boolean wasCanceled) {
+        player.retry();
+        /*status = ERROR;
+        this.sendStatusEvent(); */
+    }
+
+    @Override
+    public void onReadingStarted(int windowIndex, MediaSource.MediaPeriodId mediaPeriodId) {
+
+    }
+
+    @Override
+    public void onUpstreamDiscarded(int windowIndex, MediaSource.MediaPeriodId mediaPeriodId, MediaLoadData mediaLoadData) {
+
+    }
+
+    @Override
+    public void onDownstreamFormatChanged(int windowIndex, @Nullable MediaSource.MediaPeriodId mediaPeriodId, MediaLoadData mediaLoadData) {
+
     }
 }
